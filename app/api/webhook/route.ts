@@ -1,34 +1,56 @@
+// app/api/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { supabase } from '@/lib/supabase';
 
-// This must match the string you will enter in the Meta Dashboard later
-const VERIFY_TOKEN = 'setter-verification-token'; 
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// 1. GET Request: Used by Meta to VERIFY your webhook (The Setup Step)
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('WEBHOOK_VERIFIED');
-      // You must return the challenge integer to verify
-      return new NextResponse(challenge, { status: 200 });
-    } else {
-      return new NextResponse('Forbidden', { status: 403 });
-    }
+  if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+    return new NextResponse(challenge, { status: 200 });
   }
-  return new NextResponse('Bad Request', { status: 400 });
+  return new NextResponse('Forbidden', { status: 403 });
 }
 
-// 2. POST Request: Used by Meta to SEND you messages (The Live Data)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    console.log('Incoming Webhook:', JSON.stringify(body, null, 2));
+    console.log('Webhook Received:', JSON.stringify(body, null, 2));
 
-    // Handle the message logic here later (save to DB, update UI, etc.)
+    // Iterate through entries
+    for (const entry of body.entry) {
+      if (entry.messaging) {
+        for (const event of entry.messaging) {
+          
+          // HANDLE STANDARD MESSAGES
+          if (event.message && !event.message.is_echo) {
+            const senderId = event.sender.id;
+            const text = event.message.text || '(Attachment/Sticker)';
+            const messageId = event.message.mid;
+
+            console.log(`Saving message from ${senderId}: ${text}`);
+
+            const { error } = await supabase
+              .from('messages')
+              .insert([
+                {
+                  instagram_message_id: messageId,
+                  sender_id: senderId,
+                  message_text: text,
+                  status: 'new',
+                  created_at: new Date().toISOString()
+                }
+              ]);
+              
+            if (error) console.error('Supabase Error:', error);
+          }
+        }
+      }
+    }
     
     return new NextResponse('EVENT_RECEIVED', { status: 200 });
   } catch (error) {
