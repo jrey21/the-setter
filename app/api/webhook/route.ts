@@ -22,43 +22,51 @@ export async function POST(req: NextRequest) {
     
     // Loop through all incoming events
     for (const entry of body.entry) {
-      // Check if it is a messaging event
       if (entry.messaging) {
         for (const event of entry.messaging) {
           
-          // 1. Handle "message_edit" (The quirk you saw earlier)
-          // We treat edits as new messages for simplicity so you don't miss them
-          if (event.message_edit) {
-             const senderId = event.sender.id;
-             const text = "(Message Edited)"; 
-             const messageId = event.message_edit.mid;
-             
-             await supabase.from('messages').insert([{
-                instagram_message_id: messageId,
-                sender_id: senderId,
-                message_text: text,
-                status: 'edited'
-             }]);
-          }
+          let senderId, text, messageId;
 
+          // 1. Handle "message_edit"
+          if (event.message_edit) {
+             senderId = event.sender.id;
+             text = "(Message Edited)"; 
+             messageId = event.message_edit.mid;
+          }
           // 2. Handle standard "message"
           else if (event.message && !event.message.is_echo) {
-            const senderId = event.sender.id;
-            const text = event.message.text || '(Attachment)';
-            const messageId = event.message.mid;
+             senderId = event.sender.id;
+             text = event.message.text || '(Attachment)';
+             messageId = event.message.mid;
+          }
 
-            await supabase.from('messages').insert([{
+          // If we found a valid message, save it
+          if (messageId) {
+            console.log(`Processing message from ${senderId}: ${text}`);
+
+            // UPSERT: This prevents "Duplicate Key" crashes
+            const { error } = await supabase
+              .from('messages')
+              .upsert({
                 instagram_message_id: messageId,
                 sender_id: senderId,
                 message_text: text,
                 status: 'new'
-            }]);
+              }, { onConflict: 'instagram_message_id' }); // <--- Crucial Fix
+
+            if (error) {
+              console.error('Supabase Error:', error);
+            } else {
+              console.log('Success: Saved to Supabase');
+            }
           }
         }
       }
     }
     return new NextResponse('EVENT_RECEIVED', { status: 200 });
-  } catch (error) {
+  } catch (error: any) {
+    // Log the REAL error so we can see it in Vercel logs
+    console.error('CRITICAL ERROR:', error.message);
     return new NextResponse('Error', { status: 500 });
   }
 }
