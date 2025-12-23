@@ -1,90 +1,124 @@
-
+// app/login/page.tsx
 'use client';
-
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
-	const [email, setEmail] = useState('');
-	const [password, setPassword] = useState('');
-	const [error, setError] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-	const router = useRouter();
+  const router = useRouter();
+  const [step, setStep] = useState<'email' | 'otp'>('email');
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-	const handleLogin = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setLoading(true);
-		setError(null);
-		const { error } = await supabase.auth.signInWithPassword({ email, password });
-		setLoading(false);
-		if (error) {
-			setError(error.message);
-		} else {
-			router.push('/');
-		}
-	};
+  // 1. Send the OTP to their email
+  const handleSendOtp = async () => {
+    setLoading(true);
+    setError('');
+    
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email,
+    });
 
-	const handleGoogleLogin = async () => {
-		setLoading(true);
-		setError(null);
-		const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
-		setLoading(false);
-		if (error) setError(error.message);
-	};
+    if (error) {
+      setError(error.message);
+    } else {
+      setStep('otp'); // Switch to OTP input view
+    }
+    setLoading(false);
+  };
 
-	return (
-		<div className="flex min-h-screen items-center justify-center bg-gray-50">
-			<form onSubmit={handleLogin} className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-				<h2 className="text-2xl font-bold mb-6 text-center">Login</h2>
-				{error && <div className="mb-4 text-red-600 text-sm">{error}</div>}
-				<button
-					type="button"
-					onClick={handleGoogleLogin}
-					className="w-full flex items-center justify-center gap-2 bg-white border border-gray-300 text-gray-700 py-2 rounded font-semibold hover:bg-gray-100 transition mb-6 shadow-sm"
-					disabled={loading}
-				>
-					<svg className="w-5 h-5" viewBox="0 0 48 48"><g><path fill="#4285F4" d="M24 9.5c3.54 0 6.7 1.22 9.19 3.23l6.85-6.85C36.68 2.7 30.74 0 24 0 14.82 0 6.71 5.8 2.69 14.09l7.98 6.19C12.13 13.13 17.62 9.5 24 9.5z"/><path fill="#34A853" d="M46.1 24.55c0-1.64-.15-3.22-.42-4.74H24v9.01h12.42c-.54 2.9-2.18 5.36-4.65 7.01l7.19 5.6C43.99 37.13 46.1 31.3 46.1 24.55z"/><path fill="#FBBC05" d="M10.67 28.28a14.5 14.5 0 0 1 0-8.56l-7.98-6.19A23.97 23.97 0 0 0 0 24c0 3.93.94 7.65 2.69 10.91l7.98-6.19z"/><path fill="#EA4335" d="M24 48c6.48 0 11.93-2.15 15.9-5.85l-7.19-5.6c-2 1.34-4.56 2.14-8.71 2.14-6.38 0-11.87-3.63-14.33-8.79l-7.98 6.19C6.71 42.2 14.82 48 24 48z"/><path fill="none" d="M0 0h48v48H0z"/></g></svg>
-					Continue with Google
-				</button>
-				<div className="mb-4">
-					<label className="block mb-1 text-sm font-medium">Email</label>
-					   <input
-						   type="email"
-						   className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:border-blue-500"
-						   value={email}
-						   onChange={e => setEmail(e.target.value)}
-						   required
-						   spellCheck={false}
-						   autoCorrect="off"
-						   autoCapitalize="none"
-						   placeholder="Enter your email"
-						   title="Email address"
-					   />
-				</div>
-				<div className="mb-6">
-					<label className="block mb-1 text-sm font-medium">Password</label>
-					   <input
-						   type="password"
-						   className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:border-blue-500"
-						   value={password}
-						   onChange={e => setPassword(e.target.value)}
-						   required
-						   spellCheck={false}
-						   autoCorrect="off"
-						   autoCapitalize="none"
-						   placeholder="Enter your password"
-						   title="Password"
-					   />
-				</div>
-				<button
-					type="submit"
-					className="w-full bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700 transition"
-					disabled={loading}
-				>
-					{loading ? 'Logging in...' : 'Login'}
-				</button>
-			</form>
-		</div>
-	);
+  // 2. Verify the OTP and Log them in
+  const handleVerifyOtp = async () => {
+    setLoading(true);
+    setError('');
+
+    const { error } = await supabase.auth.verifyOtp({
+      email,
+      token: otp,
+      type: 'email',
+    });
+
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    } else {
+      // Success! Go to Dashboard
+      router.push('/');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+        
+        {/* Logo */}
+        <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+          <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+        </div>
+
+        <h1 className="text-2xl font-bold text-gray-900 mb-2">
+          {step === 'email' ? 'Welcome Back' : 'Check your Email'}
+        </h1>
+        <p className="text-sm text-gray-500 mb-8">
+          {step === 'email' 
+            ? 'Sign in to access your Setter Inbox.' 
+            : `We sent a 6-digit code to ${email}`}
+        </p>
+
+        {error && (
+          <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg mb-4">
+            {error}
+          </div>
+        )}
+
+        {/* STEP 1: EMAIL INPUT */}
+        {step === 'email' && (
+          <div className="space-y-4">
+            <input
+              type="email"
+              placeholder="name@company.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            />
+            <button
+              onClick={handleSendOtp}
+              disabled={loading || !email}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Sending...' : 'Send Login Code'}
+            </button>
+          </div>
+        )}
+
+        {/* STEP 2: OTP INPUT */}
+        {step === 'otp' && (
+          <div className="space-y-4">
+            <input
+              type="text"
+              placeholder="123456"
+              value={otp}
+              onChange={(e) => setOtp(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-center text-2xl tracking-widest focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+            />
+            <button
+              onClick={handleVerifyOtp}
+              disabled={loading || !otp}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Verifying...' : 'Verify & Login'}
+            </button>
+            <button 
+              onClick={() => setStep('email')}
+              className="text-sm text-gray-400 hover:text-gray-600 underline"
+            >
+              Use a different email
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
