@@ -6,11 +6,13 @@ import { supabase } from '@/lib/supabase';
 export default function AuthCallback() {
   const router = useRouter();
   const [status, setStatus] = useState('Verifying connection...');
+  const [debugError, setDebugError] = useState('');
 
   useEffect(() => {
     const hash = window.location.hash;
     if (!hash) {
-      setStatus('No token found. Please try connecting again.');
+      setStatus('No token found in URL.');
+      setDebugError('The URL does not contain an access_token. Did Facebook redirect correctly?');
       return;
     }
 
@@ -21,74 +23,95 @@ export default function AuthCallback() {
       findInstagramAccount(accessToken);
     } else {
       setStatus('Error: Could not retrieve access token.');
+      setDebugError('Token param was empty in the URL.');
     }
   }, []);
 
   async function findInstagramAccount(token: string) {
     try {
-      setStatus('Looking for your Instagram account...');
+      setStatus('Checking Supabase Session...');
+      
+      // 1. DEBUG: Check if user is actually logged in
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
+      if (authError || !user) {
+        throw new Error('User is not logged in. Session might have expired.');
+      }
 
-      // 1. Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('User not logged in');
+      setStatus('Fetching Facebook Pages...');
 
-      // 2. Call Meta API to find connected pages
+      // 2. DEBUG: Call Meta API
       const response = await fetch(
         `https://graph.facebook.com/v18.0/me/accounts?fields=id,name,access_token,instagram_business_account&access_token=${token}`
       );
       const data = await response.json();
 
-      if (!data.data || data.data.length === 0) {
-        setStatus('Error: No Facebook Pages found.');
-        return;
+      if (data.error) {
+        throw new Error(`Facebook API Error: ${data.error.message}`);
       }
 
-      // 3. Find the page that has an 'instagram_business_account'
+      if (!data.data || data.data.length === 0) {
+        throw new Error('No Facebook Pages found on this account.');
+      }
+
+      // 3. DEBUG: Find the connected page
       const connectedPage = data.data.find((page: any) => page.instagram_business_account);
 
       if (!connectedPage) {
-        setStatus('Error: This Page has no Instagram connected. Please link them in Instagram Settings.');
-        return;
+        // Create a list of pages found to show the user
+        const pageNames = data.data.map((p: any) => p.name).join(', ');
+        throw new Error(`Found pages (${pageNames}) but NONE have an Instagram connected.`);
       }
 
       const instagramId = connectedPage.instagram_business_account.id;
       const pageId = connectedPage.id;
-      const pageName = connectedPage.name;
 
-      setStatus(`Found Instagram linked to ${pageName}! Saving...`);
+      setStatus(`Found Instagram linked to ${connectedPage.name}! Saving to database...`);
 
-      // 4. Save EVERYTHING to Supabase
-      const { error } = await supabase.from('accounts').upsert({
+      // 4. DEBUG: Save to Supabase
+      const { error: dbError } = await supabase.from('accounts').upsert({
         user_id: user.id,
-        access_token: token,     // The main user token
-        page_token: connectedPage.access_token, // The specific page token
+        access_token: token,
+        page_token: connectedPage.access_token,
         page_id: pageId,
-        instagram_id: instagramId, // THIS IS THE KEY we need for messages
+        instagram_id: instagramId,
         platform: 'instagram',
         updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id' }); // Updates if exists, inserts if new
+      }, { onConflict: 'user_id' });
 
-      if (error) {
-        console.error('Supabase Error:', error);
-        setStatus('Database error. Check console.');
-      } else {
-        setStatus('Success! Redirecting to Inbox...');
-        setTimeout(() => {
-          router.push('/'); 
-        }, 1500);
+      if (dbError) {
+        throw new Error(`Supabase Database Error: ${dbError.message} (Details: ${dbError.details})`);
       }
 
-    } catch (err) {
+      setStatus('Success! Redirecting to Inbox...');
+      setTimeout(() => {
+        router.push('/'); 
+      }, 1500);
+
+    } catch (err: any) {
       console.error(err);
       setStatus('Failed to connect.');
+      // PRINT THE REAL ERROR ON SCREEN
+      setDebugError(err.message || JSON.stringify(err));
     }
   }
 
   return (
-    <div className="h-screen flex flex-col items-center justify-center bg-gray-50">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-      <h2 className="text-xl font-semibold text-gray-700">{status}</h2>
-      <p className="text-sm text-gray-400 mt-2">Do not close this window.</p>
+    <div className="h-screen flex flex-col items-center justify-center bg-gray-50 p-4 text-center">
+      {!debugError && <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>}
+      
+      <h2 className={`text-xl font-bold ${debugError ? 'text-red-600' : 'text-gray-700'}`}>
+        {status}
+      </h2>
+
+      {debugError && (
+        <div className="mt-6 p-4 bg-red-100 border border-red-300 rounded-lg text-left max-w-2xl w-full">
+          <p className="font-bold text-red-800 mb-2">ERROR DETAILS (Send this to support):</p>
+          <code className="block whitespace-pre-wrap text-sm text-red-700 font-mono break-all">
+            {debugError}
+          </code>
+        </div>
+      )}
     </div>
   );
 }
