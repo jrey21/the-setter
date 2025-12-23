@@ -1,23 +1,33 @@
 // app/page.tsx
 'use client';
+
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import Link from 'next/link';
 
 export default function Dashboard() {
   const [messages, setMessages] = useState<any[]>([]);
   const [selectedChat, setSelectedChat] = useState<any>(null);
+  const [user, setUser] = useState<any>(null);
 
-  // Fetch messages from Supabase
+  // Check authentication and fetch messages
   useEffect(() => {
+    const getUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      setUser(data.user);
+    };
+    getUser();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
     const fetchMessages = async () => {
-      const { data, error } = await supabase
+      const { data } = await supabase
         .from('messages')
         .select('*')
         .order('created_at', { ascending: false });
-
       if (data) setMessages(data);
     };
-
     fetchMessages();
 
     // Real-time listener
@@ -31,11 +41,22 @@ export default function Dashboard() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [user]);
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
+        <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold mb-4">Welcome to The Setter</h2>
+          <p className="mb-6">Please log in to access your dashboard.</p>
+          <Link href="/login" className="inline-block bg-blue-600 text-white px-6 py-2 rounded font-semibold hover:bg-blue-700 transition">Login</Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-white font-sans text-gray-900 overflow-hidden">
-      
       {/* LEFT SIDEBAR: Message List */}
       <div className="w-1/3 min-w-[320px] max-w-[400px] border-r border-gray-200 flex flex-col bg-white">
         
