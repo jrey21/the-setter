@@ -1,14 +1,25 @@
 // app/api/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
-// Use service role for webhook (bypasses RLS)
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy initialization to avoid build-time errors
+let supabaseAdmin: SupabaseClient | null = null;
+
+function getSupabaseAdmin(): SupabaseClient {
+  if (!supabaseAdmin) {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    
+    if (!url || !key) {
+      throw new Error('Missing Supabase environment variables');
+    }
+    
+    supabaseAdmin = createClient(url, key);
+  }
+  return supabaseAdmin;
+}
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
@@ -28,21 +39,21 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     console.log('Webhook received:', JSON.stringify(body, null, 2));
-    
+
     // Loop through all incoming events
     for (const entry of body.entry) {
       const instagramId = entry.id; // The Instagram account ID receiving the message
-      
+
       if (entry.messaging) {
         for (const event of entry.messaging) {
-          
+
           let senderId, recipientId, text, messageId, timestamp;
 
           // 1. Handle "message_edit"
           if (event.message_edit) {
             senderId = event.sender.id;
             recipientId = event.recipient.id;
-            text = "(Message Edited)"; 
+            text = "(Message Edited)";
             messageId = event.message_edit.mid;
             timestamp = event.timestamp;
           }
@@ -59,15 +70,17 @@ export async function POST(req: NextRequest) {
           if (messageId) {
             console.log(`Processing message from ${senderId}: ${text}`);
 
+            const supabase = getSupabaseAdmin();
+
             // Find the account this message belongs to
-            const { data: account } = await supabaseAdmin
+            const { data: account } = await supabase
               .from('accounts')
               .select('id')
               .eq('instagram_id', instagramId)
               .single();
 
             // Save to messages table
-            const { error } = await supabaseAdmin
+            const { error } = await supabase
               .from('messages')
               .upsert({
                 instagram_message_id: messageId,

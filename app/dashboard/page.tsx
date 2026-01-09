@@ -89,7 +89,7 @@ export default function Dashboard() {
 
     const account = accounts[0];
     setAccountInfo(account);
-    
+
     // Determine which token to use
     // If page_token exists, we connected via Facebook Login (has page access)
     // If only access_token exists, we connected via Instagram Login or manual token
@@ -112,10 +112,10 @@ export default function Dashboard() {
         setLoading(false);
         return;
       }
-      
+
       // For Facebook Login tokens, use graph.facebook.com
       const baseUrl = 'https://graph.facebook.com/v18.0';
-      
+
       const convRes = await axios.get(
         `${baseUrl}/${targetId}/conversations`,
         {
@@ -127,10 +127,10 @@ export default function Dashboard() {
           },
         }
       );
-      
+
       const conversationsData = convRes.data.data || [];
       const conversationsWithMessages: Conversation[] = [];
-      
+
       for (const conv of conversationsData) {
         try {
           const msgRes = await axios.get(
@@ -143,7 +143,7 @@ export default function Dashboard() {
               },
             }
           );
-          
+
           const lastMsg = msgRes.data.data?.[0];
           conversationsWithMessages.push({
             id: conv.id,
@@ -163,15 +163,15 @@ export default function Dashboard() {
           });
         }
       }
-      
+
       setConversations(conversationsWithMessages);
       await fetchWebhookMessages();
-      
+
     } catch (err: any) {
       console.error('Error fetching conversations:', err);
       const errorMessage = err.response?.data?.error?.message || 'Failed to fetch messages.';
       const errorCode = err.response?.data?.error?.code;
-      
+
       // Provide helpful guidance for common errors
       if (errorCode === 3 || errorMessage.includes('capability')) {
         setError(`(#${errorCode}) ${errorMessage}`);
@@ -189,16 +189,16 @@ export default function Dashboard() {
   // ------------------------------------------------------------------
   const fetchConversationMessages = async (conversationId: string) => {
     if (!accountInfo) return;
-    
+
     setLoadingMessages(true);
     const tokenToUse = accountInfo.page_token || accountInfo.access_token;
-    
+
     // Use Instagram API for Instagram Login tokens (no page_token)
     const isInstagramLoginToken = !accountInfo.page_token;
-    const baseUrl = isInstagramLoginToken 
+    const baseUrl = isInstagramLoginToken
       ? 'https://graph.instagram.com/v18.0'
       : 'https://graph.facebook.com/v18.0';
-    
+
     try {
       const msgRes = await axios.get(
         `${baseUrl}/${conversationId}/messages`,
@@ -210,13 +210,13 @@ export default function Dashboard() {
           },
         }
       );
-      
+
       const msgs: Message[] = (msgRes.data.data || []).map((m: any) => ({
         ...m,
         conversation_id: conversationId,
         participants: [],
       }));
-      
+
       msgs.sort((a, b) => new Date(a.created_time).getTime() - new Date(b.created_time).getTime());
       setConversationMessages(msgs);
     } catch (err: any) {
@@ -230,17 +230,17 @@ export default function Dashboard() {
   // ------------------------------------------------------------------
   const fetchWebhookMessages = async () => {
     if (!accountInfo) return;
-    
+
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('account_id', accountInfo.id)
       .order('created_at', { ascending: false })
       .limit(100);
-    
+
     if (!error && data) {
       setWebhookMessages(data);
-      
+
       // Group messages by sender to create "conversations"
       const grouped = data.reduce((acc: any, msg: any) => {
         const key = msg.sender_id;
@@ -256,7 +256,7 @@ export default function Dashboard() {
         acc[key].messages.push(msg);
         return acc;
       }, {});
-      
+
       // Convert to array and set as conversations if no API conversations
       const webhookConvs = Object.values(grouped) as Conversation[];
       if (conversations.length === 0 && webhookConvs.length > 0) {
@@ -270,10 +270,10 @@ export default function Dashboard() {
   // ------------------------------------------------------------------
   const handleSelectConversation = async (conv: Conversation) => {
     setSelectedConversation(conv);
-    
+
     // Check if this is a webhook-based conversation (sender_id as id)
     const isWebhookConv = !conv.id.includes('_'); // API conv IDs usually have underscores
-    
+
     if (isWebhookConv && accountInfo) {
       // Fetch messages from database for this sender
       setLoadingMessages(true);
@@ -283,7 +283,7 @@ export default function Dashboard() {
         .eq('account_id', accountInfo.id)
         .eq('sender_id', conv.id)
         .order('created_at', { ascending: true });
-      
+
       if (!error && data) {
         // Convert webhook messages to Message format
         const msgs: Message[] = data.map((m: any) => ({
@@ -309,7 +309,7 @@ export default function Dashboard() {
   useEffect(() => {
     const init = async () => {
       const rescueToken = localStorage.getItem('rescue_token');
-      
+
       if (rescueToken) {
         setStatus('Finishing connection...');
         const { data: { user } } = await supabase.auth.getUser();
@@ -369,7 +369,7 @@ export default function Dashboard() {
           console.log('New message received:', payload);
           // Refresh conversations when new message arrives
           fetchWebhookMessages();
-          
+
           // If viewing this conversation, add the message
           if (selectedConversation && payload.new.sender_id === selectedConversation.id) {
             const newMsg: Message = {
@@ -408,7 +408,7 @@ export default function Dashboard() {
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (days === 0) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } else if (days === 1) {
@@ -430,7 +430,7 @@ export default function Dashboard() {
   return (
     <div className="flex h-screen bg-gray-50">
       <Sidebar user={user} accountConnected={!!accountInfo} />
-      
+
       {/* Main Content */}
       <div className="flex-1 flex">
         {/* Conversation List */}
@@ -440,7 +440,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between mb-4">
               <h1 className="text-xl font-bold text-gray-900">Inbox</h1>
               <div className="flex items-center gap-2">
-                <button 
+                <button
                   onClick={fetchInstagramConversations}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="Refresh"
@@ -451,7 +451,7 @@ export default function Dashboard() {
                 </button>
               </div>
             </div>
-            
+
             {/* Search */}
             <div className="relative">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -476,7 +476,7 @@ export default function Dashboard() {
               </div>
             )}
           </div>
-          
+
           {/* Conversation List */}
           <div className="flex-1 overflow-y-auto">
             {loading ? (
@@ -493,7 +493,7 @@ export default function Dashboard() {
                 </div>
                 <p className="text-gray-900 font-medium mb-2">Connection Error</p>
                 <p className="text-sm text-gray-500 mb-4">{error}</p>
-                <button 
+                <button
                   onClick={() => router.push('/')}
                   className="btn-primary text-sm"
                 >
@@ -521,7 +521,7 @@ export default function Dashboard() {
                     </p>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={() => fetchInstagramConversations()}
                   className="mt-4 text-sm text-indigo-600 hover:text-indigo-700 font-medium flex items-center gap-2"
                 >
@@ -535,15 +535,14 @@ export default function Dashboard() {
               filteredConversations.map((conv) => {
                 const participant = getOtherParticipant(conv);
                 const isSelected = selectedConversation?.id === conv.id;
-                
+
                 return (
-                  <div 
-                    key={conv.id} 
-                    className={`p-4 cursor-pointer transition-all border-b border-gray-50 ${
-                      isSelected 
-                        ? 'bg-indigo-50 border-l-4 border-l-indigo-500' 
+                  <div
+                    key={conv.id}
+                    className={`p-4 cursor-pointer transition-all border-b border-gray-50 ${isSelected
+                        ? 'bg-indigo-50 border-l-4 border-l-indigo-500'
                         : 'hover:bg-gray-50 border-l-4 border-l-transparent'
-                    }`}
+                      }`}
                     onClick={() => handleSelectConversation(conv)}
                   >
                     <div className="flex items-start gap-3">
@@ -594,15 +593,15 @@ export default function Dashboard() {
               {/* Chat Header */}
               <div className="p-4 border-b border-gray-100 bg-white flex items-center gap-4">
                 <div className="w-12 h-12 rounded-full bg-gradient-to-br from-indigo-400 to-rose-400 flex items-center justify-center text-white font-semibold">
-                  {(getOtherParticipant(selectedConversation)?.name || 
-                    getOtherParticipant(selectedConversation)?.username || 
+                  {(getOtherParticipant(selectedConversation)?.name ||
+                    getOtherParticipant(selectedConversation)?.username ||
                     getOtherParticipant(selectedConversation)?.id || '?')[0].toUpperCase()}
                 </div>
                 <div className="flex-1">
                   <h2 className="font-bold text-gray-900">
-                    {getOtherParticipant(selectedConversation)?.name || 
-                     getOtherParticipant(selectedConversation)?.username || 
-                     `User ${getOtherParticipant(selectedConversation)?.id?.slice(-6)}`}
+                    {getOtherParticipant(selectedConversation)?.name ||
+                      getOtherParticipant(selectedConversation)?.username ||
+                      `User ${getOtherParticipant(selectedConversation)?.id?.slice(-6)}`}
                   </h2>
                   <p className="text-xs text-gray-500">
                     Instagram • {getOtherParticipant(selectedConversation)?.id}
@@ -621,7 +620,7 @@ export default function Dashboard() {
                   </button>
                 </div>
               </div>
-              
+
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-6 bg-gray-50">
                 {loadingMessages ? (
@@ -639,11 +638,11 @@ export default function Dashboard() {
                   <div className="space-y-4">
                     {conversationMessages.map((msg, index) => {
                       const fromMe = isFromMe(msg);
-                      const showAvatar = index === 0 || 
+                      const showAvatar = index === 0 ||
                         conversationMessages[index - 1]?.from?.id !== msg.from?.id;
-                      
+
                       return (
-                        <div 
+                        <div
                           key={msg.id}
                           className={`flex ${fromMe ? 'justify-end' : 'justify-start'} animate-fade-in`}
                         >
@@ -654,11 +653,10 @@ export default function Dashboard() {
                               </div>
                             )}
                             {!fromMe && !showAvatar && <div className="w-8"></div>}
-                            <div className={`rounded-2xl px-4 py-3 ${
-                              fromMe 
-                                ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-br-md' 
+                            <div className={`rounded-2xl px-4 py-3 ${fromMe
+                                ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-br-md'
                                 : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md shadow-sm'
-                            }`}>
+                              }`}>
                               <p className="text-sm leading-relaxed">{msg.message || '(No content)'}</p>
                               <p className={`text-[10px] mt-1 ${fromMe ? 'text-indigo-200' : 'text-gray-400'}`}>
                                 {new Date(msg.created_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -672,7 +670,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-              
+
               {/* Message Input */}
               <div className="p-4 border-t border-gray-100 bg-white">
                 <div className="flex items-center gap-3">
@@ -681,13 +679,13 @@ export default function Dashboard() {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                     </svg>
                   </button>
-                  <input 
-                    type="text" 
-                    placeholder="Type a message..." 
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
                     className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     disabled
                   />
-                  <button 
+                  <button
                     className="p-3 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl opacity-50 cursor-not-allowed"
                     disabled
                   >
