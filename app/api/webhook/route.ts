@@ -1,14 +1,22 @@
 // app/api/webhook/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+// Use service role for webhook (bypasses RLS)
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export async function GET(req: NextRequest) {
   const searchParams = req.nextUrl.searchParams;
   const mode = searchParams.get('hub.mode');
   const token = searchParams.get('hub.verify_token');
   const challenge = searchParams.get('hub.challenge');
+
+  console.log('Webhook verification:', { mode, token, challenge });
 
   if (mode === 'subscribe' && token === VERIFY_TOKEN) {
     return new NextResponse(challenge, { status: 200 });
@@ -19,40 +27,57 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    console.log('Webhook received:', JSON.stringify(body, null, 2));
     
     // Loop through all incoming events
     for (const entry of body.entry) {
+      const instagramId = entry.id; // The Instagram account ID receiving the message
+      
       if (entry.messaging) {
         for (const event of entry.messaging) {
           
-          let senderId, text, messageId;
+          let senderId, recipientId, text, messageId, timestamp;
 
           // 1. Handle "message_edit"
           if (event.message_edit) {
-             senderId = event.sender.id;
-             text = "(Message Edited)"; 
-             messageId = event.message_edit.mid;
+            senderId = event.sender.id;
+            recipientId = event.recipient.id;
+            text = "(Message Edited)"; 
+            messageId = event.message_edit.mid;
+            timestamp = event.timestamp;
           }
           // 2. Handle standard "message"
           else if (event.message && !event.message.is_echo) {
-             senderId = event.sender.id;
-             text = event.message.text || '(Attachment)';
-             messageId = event.message.mid;
+            senderId = event.sender.id;
+            recipientId = event.recipient.id;
+            text = event.message.text || '(Attachment)';
+            messageId = event.message.mid;
+            timestamp = event.timestamp;
           }
 
           // If we found a valid message, save it
           if (messageId) {
             console.log(`Processing message from ${senderId}: ${text}`);
 
-            // UPSERT: This prevents "Duplicate Key" crashes
-            const { error } = await supabase
+            // Find the account this message belongs to
+            const { data: account } = await supabaseAdmin
+              .from('accounts')
+              .select('id')
+              .eq('instagram_id', instagramId)
+              .single();
+
+            // Save to messages table
+            const { error } = await supabaseAdmin
               .from('messages')
               .upsert({
                 instagram_message_id: messageId,
                 sender_id: senderId,
-                message_text: text,
-                status: 'new'
-              }, { onConflict: 'instagram_message_id' }); // <--- Crucial Fix
+                recipient_id: recipientId,
+                message: text,
+                message_type: 'text',
+                instagram_timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
+                account_id: account?.id || null,
+              }, { onConflict: 'instagram_message_id' });
 
             if (error) {
               console.error('Supabase Error:', error);
@@ -65,7 +90,6 @@ export async function POST(req: NextRequest) {
     }
     return new NextResponse('EVENT_RECEIVED', { status: 200 });
   } catch (error: any) {
-    // Log the REAL error so we can see it in Vercel logs
     console.error('CRITICAL ERROR:', error.message);
     return new NextResponse('Error', { status: 500 });
   }
