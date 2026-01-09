@@ -231,14 +231,40 @@ export default function Dashboard() {
   const fetchWebhookMessages = async () => {
     if (!accountInfo) return;
 
-    const { data, error } = await supabase
+    // Fetch messages - try by account_id first, then by recipient_id (instagram_id)
+    let { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('account_id', accountInfo.id)
       .order('created_at', { ascending: false })
       .limit(100);
 
-    if (!error && data) {
+    // If no messages found by account_id, try by recipient_id (for messages with NULL account_id)
+    if ((!data || data.length === 0) && accountInfo.instagram_id) {
+      const result = await supabase
+        .from('messages')
+        .select('*')
+        .eq('recipient_id', accountInfo.instagram_id)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      data = result.data;
+      error = result.error;
+    }
+
+    // Also try without any filter if still no data (for development/testing)
+    if (!data || data.length === 0) {
+      const result = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      data = result.data;
+      error = result.error;
+    }
+
+    console.log('Fetched messages:', data);
+
+    if (!error && data && data.length > 0) {
       setWebhookMessages(data);
 
       // Group messages by sender to create "conversations"
@@ -249,7 +275,14 @@ export default function Dashboard() {
             id: key,
             participants: [{ id: key, username: msg.sender_username || key }],
             updated_time: msg.created_at,
-            lastMessage: msg,
+            lastMessage: {
+              id: msg.instagram_message_id || msg.id,
+              from: { id: msg.sender_id, username: msg.sender_username },
+              message: msg.message,
+              created_time: msg.instagram_timestamp || msg.created_at,
+              conversation_id: key,
+              participants: [{ id: key, username: msg.sender_username || key }],
+            },
             messages: [],
           };
         }
@@ -257,11 +290,9 @@ export default function Dashboard() {
         return acc;
       }, {});
 
-      // Convert to array and set as conversations if no API conversations
+      // Convert to array and set as conversations
       const webhookConvs = Object.values(grouped) as Conversation[];
-      if (conversations.length === 0 && webhookConvs.length > 0) {
-        setConversations(webhookConvs);
-      }
+      setConversations(webhookConvs);
     }
   };
 
@@ -274,17 +305,35 @@ export default function Dashboard() {
     // Check if this is a webhook-based conversation (sender_id as id)
     const isWebhookConv = !conv.id.includes('_'); // API conv IDs usually have underscores
 
-    if (isWebhookConv && accountInfo) {
+    if (isWebhookConv) {
       // Fetch messages from database for this sender
       setLoadingMessages(true);
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('account_id', accountInfo.id)
-        .eq('sender_id', conv.id)
-        .order('created_at', { ascending: true });
+      
+      // Try multiple query strategies
+      let data: any[] | null = null;
+      
+      // First try with account_id
+      if (accountInfo?.id) {
+        const result = await supabase
+          .from('messages')
+          .select('*')
+          .eq('account_id', accountInfo.id)
+          .eq('sender_id', conv.id)
+          .order('created_at', { ascending: true });
+        data = result.data;
+      }
+      
+      // If no data, try without account_id filter
+      if (!data || data.length === 0) {
+        const result = await supabase
+          .from('messages')
+          .select('*')
+          .eq('sender_id', conv.id)
+          .order('created_at', { ascending: true });
+        data = result.data;
+      }
 
-      if (!error && data) {
+      if (data && data.length > 0) {
         // Convert webhook messages to Message format
         const msgs: Message[] = data.map((m: any) => ({
           id: m.instagram_message_id || m.id,
@@ -608,12 +657,12 @@ export default function Dashboard() {
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="View profile">
+                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="View profile" aria-label="View profile">
                     <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
                   </button>
-                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="More options">
+                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="More options" aria-label="More options">
                     <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                     </svg>
@@ -674,7 +723,7 @@ export default function Dashboard() {
               {/* Message Input */}
               <div className="p-4 border-t border-gray-100 bg-white">
                 <div className="flex items-center gap-3">
-                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+                  <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors" title="Attach file" aria-label="Attach file">
                     <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                     </svg>
@@ -688,6 +737,8 @@ export default function Dashboard() {
                   <button
                     className="p-3 bg-gradient-to-r from-indigo-500 to-indigo-600 text-white rounded-xl opacity-50 cursor-not-allowed"
                     disabled
+                    title="Send message"
+                    aria-label="Send message"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
