@@ -68,16 +68,47 @@ export async function POST(req: NextRequest) {
 
           // If we found a valid message, save it
           if (messageId) {
-            console.log(`Processing message from ${senderId}: ${text}`);
+            console.log(`Processing message from ${senderId} to ${recipientId}: ${text}`);
+            console.log(`Instagram ID from entry: ${instagramId}`);
 
             const supabase = getSupabaseAdmin();
 
-            // Find the account this message belongs to
-            const { data: account } = await supabase
-              .from('accounts')
-              .select('id')
-              .eq('instagram_id', instagramId)
-              .single();
+            // Find the account this message belongs to dynamically
+            // The recipient_id is the Instagram account receiving the message
+            // This should match the instagram_id stored in accounts table
+            let accountId = null;
+            
+            // Strategy 1: Match by recipient_id (most reliable for incoming messages)
+            if (recipientId) {
+              const { data: acc } = await supabase
+                .from('accounts')
+                .select('id, instagram_id')
+                .eq('instagram_id', recipientId)
+                .single();
+              if (acc) {
+                accountId = acc.id;
+                console.log('Found account by recipient_id:', acc);
+              }
+            }
+            
+            // Strategy 2: Match by entry.id (Instagram account ID from webhook payload)
+            if (!accountId) {
+              const { data: acc2 } = await supabase
+                .from('accounts')
+                .select('id, instagram_id')
+                .eq('instagram_id', instagramId)
+                .single();
+              if (acc2) {
+                accountId = acc2.id;
+                console.log('Found account by entry ID:', acc2);
+              }
+            }
+            
+            // No fallback - if account not found, message won't be linked
+            // This is correct for multi-user system
+            if (!accountId) {
+              console.log('No matching account found for recipient:', recipientId);
+            }
 
             // Save to messages table
             const { error } = await supabase
@@ -89,7 +120,7 @@ export async function POST(req: NextRequest) {
                 message: text,
                 message_type: 'text',
                 instagram_timestamp: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
-                account_id: account?.id || null,
+                account_id: accountId,
               }, { onConflict: 'instagram_message_id' });
 
             if (error) {
